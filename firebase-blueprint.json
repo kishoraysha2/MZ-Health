@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated user accounts with roles and localization settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth User UID ID matching database key" },
+        "phoneNumber": { "type": "string", "description": "User mobile number in international format" },
+        "email": { "type": "string", "format": "email", "description": "Optional email address" },
+        "displayName": { "type": "string", "description": "Full name" },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "doctor", "patient"], "description": "Role classification" },
+        "isActive": { "type": "boolean", "description": "Indicates whether the user account is active" },
+        "languagePreference": { "type": "string", "enum": ["bn", "en"], "description": "Preferred UI localization setting" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account registration timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Profile modification timestamp" },
+        "lastLoginAt": { "type": "string", "format": "date-time", "description": "Last authenticated sign-in log time" }
+      },
+      "required": ["uid", "phoneNumber", "displayName", "role", "isActive", "languagePreference"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User notification preferences and accessibility parameters.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Associated user UID matching users collection" },
+        "pushNotificationsEnabled": { "type": "boolean", "description": "Toggle push alerting features" },
+        "emailNotificationsEnabled": { "type": "boolean", "description": "Toggle email messaging" },
+        "smsNotificationsEnabled": { "type": "boolean", "description": "Toggle direct SMS dispatch" },
+        "accessibility": { "type": "object", "description": "UI styling preferences" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last saved settings timestamp" }
+      },
+      "required": ["userId", "pushNotificationsEnabled", "emailNotificationsEnabled", "smsNotificationsEnabled"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Append-only clinical and regulatory action trace logger",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string", "description": "Unique key matching path ID" },
+        "actorId": { "type": "string", "description": "User or system initiating key path changes" },
+        "actorRole": { "type": "string", "enum": ["super_admin", "admin", "doctor", "patient", "system"], "description": "Role claim of initiator" },
+        "actionType": { "type": "string", "enum": ["CREATE", "READ", "UPDATE", "DELETE", "LOGIN", "EMERGENCY_OVERRIDE"], "description": "CRUD classification" },
+        "resourceTarget": { "type": "string", "description": "Collection prefix of target doc" },
+        "resourceDocId": { "type": "string", "description": "ID hash of mutated document mapping" },
+        "ipAddress": { "type": "string", "description": "Network source address indicator" },
+        "userAgent": { "type": "string", "description": "Device system description string" },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Atomic system generation time" }
+      },
+      "required": ["logId", "actorId", "actorRole", "actionType", "resourceTarget", "resourceDocId", "ipAddress", "userAgent", "timestamp"]
+    },
+    "DoctorProfile": {
+      "title": "DoctorProfile",
+      "description": "Verified medical practitioner profiles with regulatory BMDC license and chamber schedules.",
+      "type": "object",
+      "properties": {
+        "doctorId": { "type": "string", "description": "Reference mapping back to users.uid" },
+        "bmdcRegNumber": { "type": "string", "description": "Bangladesh Medical & Dental Council licensing number" },
+        "bmdcVerified": { "type": "boolean", "description": "Registration verification status managed by admin" },
+        "bmdcVerificationDate": { "type": "string", "format": "date-time", "description": "Audit verification timestamp" },
+        "bmdcVerifiedBy": { "type": "string", "description": "Admin UID approving regulatory license" },
+        "nationalId": { "type": "string", "description": "Bangladeshi National Identity Number" },
+        "gender": { "type": "string", "description": "Gender expression of doctor" },
+        "dateOfBirth": { "type": "string", "format": "date", "description": "Date of birth" },
+        "specialities": { "type": "array", "description": "Medical specialties lists" },
+        "qualifications": { "type": "array", "description": "Academic and clinical qualification credentials" },
+        "experienceYears": { "type": "integer", "description": "Years of medical practice" },
+        "currentWorkplace": { "type": "string", "description": "Primary healthcare facility affiliation" },
+        "chambers": { "type": "array", "description": "Complex map representations of surgical or clinical chambers in Bangladesh" },
+        "consultationFee": { "type": "integer", "description": "Cost in BDT for visits" },
+        "languagesSpoken": { "type": "array", "description": "Languages supported during consultations" },
+        "bio": { "type": "string", "description": "Clinician self description summary" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["doctorId", "bmdcRegNumber", "bmdcVerified", "specialities", "qualifications", "experienceYears", "currentWorkplace", "chambers", "createdAt", "updatedAt"]
+    },
+    "PatientProfile": {
+      "title": "PatientProfile",
+      "description": "Patient medical profiles containing primary demographics, medical history and emergency contacts.",
+      "type": "object",
+      "properties": {
+        "patientId": { "type": "string", "description": "Reference mapping back to users.uid" },
+        "dateOfBirth": { "type": "string", "format": "date", "description": "Birth date" },
+        "age": { "type": "integer", "description": "Chronological calculated age" },
+        "gender": { "type": "string", "description": "Gender classification" },
+        "bloodGroup": { "type": "string", "description": "Clinically safe blood category" },
+        "emergencyContact": { "type": "object", "description": "Crisis contact relation mapping containing name and verified phone number" },
+        "heightCm": { "type": "integer", "description": "Physiological height tracker" },
+        "weightKg": { "type": "integer", "description": "Physiological weight tracker" },
+        "allergies": { "type": "array", "description": "List of allergen alerts" },
+        "chronicDiseases": { "type": "array", "description": "Long-term clinical backgrounds" },
+        "currentMedications": { "type": "array", "description": "Currently running therapeutic drugs" },
+        "medicalNotes": { "type": "string", "description": "Additional subjective medical descriptors" },
+        "profilePhotoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientId", "dateOfBirth", "gender", "bloodGroup", "emergencyContact", "allergies", "chronicDiseases", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores security credentials and user identities"
+    },
+    "/settings/{userId}": {
+      "schema": "UserSettings",
+      "description": "Personal account preferences"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Immutable compliance trail logs"
+    },
+    "/doctors/{doctorId}": {
+      "schema": "DoctorProfile",
+      "description": "Specialist clinician registry and chamber timetables"
+    },
+    "/patients/{patientId}": {
+      "schema": "PatientProfile",
+      "description": "Standard demographic records and clinical alerts"
+    }
+  }
+}

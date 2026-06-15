@@ -1,0 +1,225 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Implicit Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection check helper rule ensuring public verification succeeds
+    match /test_connection_ping/{pingId} {
+      allow get: if true;
+    }
+
+    // Reusable core security predicates
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Explicit Role lookup using highly secure Firestore dynamic document fetch.
+    // Auth tokens can have delayed custom claims, so looking up the actual doc is most reliable.
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isOfRole(role) {
+      return isAuthenticated() && getUserRole() == role;
+    }
+
+    function isSystemAdmin() {
+      return isAuthenticated() && (getUserRole() == 'admin' || getUserRole() == 'super_admin');
+    }
+
+    // String validation utility preventing DB pollution
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- Module 1: Users Collection ---
+    // Path: /users/{userId}
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128
+        && data.phoneNumber is string && data.phoneNumber.size() <= 32
+        && (!data.keys().contains('email') || (data.email is string && data.email.size() <= 128))
+        && data.displayName is string && data.displayName.size() <= 128
+        && data.role in ['super_admin', 'admin', 'doctor', 'patient']
+        && data.isActive is bool
+        && data.languagePreference in ['bn', 'en'];
+    }
+
+    match /users/{userId} {
+      allow get: if isAuthenticated() && (isOwner(userId) || isSystemAdmin());
+      
+      // Let any signed-in user register their profile if they don't have one, but force patient role initially.
+      // Or they can register doctor but it requires admin verification in Doctor module.
+      allow create: if isAuthenticated() 
+                    && isOwner(userId) 
+                    && isValidUser(incoming())
+                    && incoming().role in ['patient', 'doctor']  // Block self-creation as admin/super_admin
+                    && incoming().isActive == true
+                    && incoming().createdAt == request.time;
+
+      // Allow users to update their details except core security keys (role, isActive, createdAt)
+      allow update: if isAuthenticated() 
+                    && (
+                      (isOwner(userId) && isValidUser(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'languagePreference', 'updatedAt', 'lastLoginAt']) && incoming().updatedAt == request.time)
+                      || (isSystemAdmin() && isValidUser(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['isActive', 'role', 'updatedAt']) && incoming().updatedAt == request.time)
+                    );
+
+      allow delete: if false; // Soft-delete patterns for audit integrity
+    }
+
+    // --- Module 2: Settings Collection ---
+    // Path: /settings/{userId}
+    function isValidSettings(data) {
+      return data.userId is string && data.userId.size() <= 128
+        && data.pushNotificationsEnabled is bool
+        && data.emailNotificationsEnabled is bool
+        && data.smsNotificationsEnabled is bool
+        && (!data.keys().contains('accessibility') || (data.accessibility is map));
+    }
+
+    match /settings/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isSystemAdmin());
+      allow create: if isOwner(userId) && isValidSettings(incoming());
+      allow update: if isOwner(userId) && isValidSettings(incoming()) && incoming().userId == existing().userId;
+      allow delete: if false;
+    }
+
+    // Variant B: Regional Platform configuration Constants
+    match /settings/sys_global_config {
+      allow read: if isAuthenticated();
+      allow write: if isSystemAdmin();
+    }
+
+    // --- Module 3: Audit Logs Collection (Compliance trail is Write-Once, Append-Only) ---
+    // Path: /audit_logs/{logId}
+    function isValidAuditLog(data) {
+      return data.logId is string && data.logId.size() <= 128
+        && data.actorId is string && data.actorId.size() <= 128
+        && data.actorRole in ['super_admin', 'admin', 'doctor', 'patient', 'system']
+        && data.actionType in ['CREATE', 'READ', 'UPDATE', 'DELETE', 'LOGIN', 'EMERGENCY_OVERRIDE']
+        && data.resourceTarget is string && data.resourceTarget.size() <= 128
+        && data.resourceDocId is string && data.resourceDocId.size() <= 128
+        && data.ipAddress is string && data.ipAddress.size() <= 64
+        && data.userAgent is string && data.userAgent.size() <= 512
+        && data.timestamp == request.time;
+    }
+
+    match /audit_logs/{logId} {
+      allow create: if isAuthenticated() 
+                    && isOwner(incoming().actorId) 
+                    && isValidAuditLog(incoming())
+                    && isValidId(logId);
+      allow get: if isSystemAdmin();
+      allow list: if isSystemAdmin();
+      allow update, delete: if false; // Write-Once Immutable Enforcement guarantees compliance
+    }
+
+    // --- Helper Validation procedures for Doctor Profile ---
+    function isValidDoctor(data) {
+      return data.doctorId is string && data.doctorId.size() <= 128
+        && data.bmdcRegNumber is string && data.bmdcRegNumber.size() <= 128
+        && data.bmdcVerified is bool
+        && data.specialities is list
+        && data.qualifications is list
+        && data.experienceYears is int
+        && data.currentWorkplace is string && data.currentWorkplace.size() <= 256
+        && data.consultationFee is int
+        && data.languagesSpoken is list
+        && data.totalAppointmentsCount is int;
+    }
+
+    // --- Helper Validation procedures for Patient Profile ---
+    function isValidPatient(data) {
+      return data.patientId is string && data.patientId.size() <= 128
+        && data.dateOfBirth is string && data.dateOfBirth.size() <= 128
+        && data.gender in ['male', 'female', 'other']
+        && data.bloodGroup in ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+        && data.emergencyContact is map
+        && data.emergencyContact.name is string && data.emergencyContact.name.size() <= 128
+        && data.emergencyContact.relationship is string && data.emergencyContact.relationship.size() <= 128
+        && data.emergencyContact.phoneNumber is string && data.emergencyContact.phoneNumber.size() <= 32
+        && data.heightCm is int
+        && data.weightKg is int
+        && data.allergies is list
+        && data.chronicDiseases is list
+        && data.currentMedications is list
+        && data.medicalNotes is string && data.medicalNotes.size() <= 2048
+        && data.status in ['active', 'inactive'];
+    }
+
+    // --- Module 4: Doctors Collection ---
+    match /doctors/{doctorId} {
+      allow read: if isAuthenticated(); // Registered users can look up doctor availability
+      
+      allow create: if isAuthenticated()
+                    && isOwner(doctorId)
+                    && isValidDoctor(incoming())
+                    && incoming().bmdcVerified == false; // Forbid self-verification on registration
+                    
+      allow update: if isAuthenticated()
+                    && (
+                      (isSystemAdmin() && isValidDoctor(incoming()))
+                      || (isOwner(doctorId) 
+                          && isValidDoctor(incoming()) 
+                          && incoming().bmdcVerified == existing().bmdcVerified)
+                    );
+                    
+      allow delete: if false; // Compliance retention
+
+      // Sprint 2: Doctor subcollections
+      match /private/metadata {
+        // Patients are strictly prohibited from accessing private medical parameters
+        allow read, write: if isAuthenticated() && (isOwner(doctorId) || isSystemAdmin());
+      }
+
+      match /chambers/{chamberId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && (isOwner(doctorId) || isSystemAdmin());
+      }
+    }
+
+    // Sprint 2: Unique BMDC Verification Registry
+    match /unique_bmdc/{bmdcNumber} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (getUserRole() == 'doctor' || isSystemAdmin());
+    }
+
+    // Sprint 2: Highly Optimized Search Catalogs
+    match /doctor_catalogs/{catalogDoctorId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isOwner(catalogDoctorId) || isSystemAdmin());
+    }
+
+    // --- Module 5: Patients Collection ---
+    match /patients/{patientId} {
+      allow read: if isAuthenticated() && (isOwner(patientId) || isSystemAdmin() || getUserRole() == 'doctor');
+      
+      allow create: if isAuthenticated()
+                    && isOwner(patientId)
+                    && isValidPatient(incoming());
+                    
+      allow update: if isAuthenticated()
+                    && (
+                      (isOwner(patientId) && isValidPatient(incoming()))
+                      || (isSystemAdmin() && isValidPatient(incoming()))
+                    );
+                    
+      allow delete: if false; // Soft-delete retention
+    }
+  }
+}
